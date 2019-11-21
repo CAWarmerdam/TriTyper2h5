@@ -36,7 +36,7 @@ class ArgumentParser:
         parser.add_argument('-i', '--input', type=self.is_readable_dir, required=True,
                             help="Enter the path to a TriTyper file.".format(os.linesep))
 
-        parser.add_argument('-o', '--output_path', type=self.is_writable_location, required=True,
+        parser.add_argument('-o', '--output', type=self.is_writable_location, required=True,
                             help="The path to write output to.")
 
         parser.add_argument('-n', '--study_name', type=str,
@@ -81,11 +81,13 @@ class TriTyperDataException(Exception):
 
 class TriTyperData:
     POSSIBLE_ALLELES = ["A", "C", "T", "G", "U", "I", "N"]
+    PANDAS_DF_CHUNK_SIZE = 10 ** 6
 
     def __init__(self, name):
         self.abs_path = os.path.abspath(name)
         self.genotype_matrix_file_path = os.path.join(self.abs_path, "GenotypeMatrix.dat")
         self.dosage_matrix_file_path = os.path.join(self.abs_path, "ImputedDosageMatrix.dat")
+        self.number_of_variants = 0
 
         print("Loading TriTyper data from '{}'...".format(self.abs_path))
 
@@ -100,13 +102,13 @@ class TriTyperData:
 
         self.individuals_data = self.read_individuals_data()
         print("Loaded {} individuals".format(len(self.individuals_data)))
-        self.variants = self.read_variants()
-        print("Loaded {} variants".format(len(self.variants)))
+        self.variants_file_reader = self.read_variants()
+        print("Loaded {} variants".format(self.number_of_variants))
 
     def read_individuals_data(self):
         allele_recoding_file_path = os.path.join(self.abs_path, "Individuals.txt")
         try:
-            return pd.read_csv(allele_recoding_file_path, header=None, names = ["individuals"])
+            return pd.read_csv(allele_recoding_file_path, header=None, names = ["individual"])
         except IOError as e:
             raise TriTyperDataException("Could not read '{}'. {}".format(allele_recoding_file_path, str(e)))
 
@@ -115,19 +117,28 @@ class TriTyperData:
         snp_mappings_path = os.path.join(self.abs_path, "SNPMappings.txt")
 
         try:
-            snps_data = pd.read_csv(snps_file_path, header=None, names=["ID", "ALTID"])
-            snp_mappings_data = pd.read_csv(snp_mappings_path, header=None, sep="\t", names=["CHR", "bp", "IDS"])
-            if len(snps_data) != len(snp_mappings_data):
-                raise TriTyperDataException("SNP data from '{}' and '{}' do not have equal lengths"
-                                            .format(snps_file_path, snp_mappings_path))
+            with open(snps_file_path) as snps_file:
+                for i, l in enumerate(snps_file):
+                    pass
+            self.number_of_variants = i + 1
+            variants_file_reader = pd.read_csv(snp_mappings_path, header=None, sep="\t", names=["CHR", "bp", "IDS"],
+                                            chunksize=self.PANDAS_DF_CHUNK_SIZE)
 
-            variants = pd.concat([snps_data, snp_mappings_data], axis=1)
-            variants["allele1"] = 0
-            variants["allele2"] = 0
+            number_of_snps_from_mapping_file = 0
+            for variant_chunk in variants_file_reader:
+                variant_chunk['ID'], variant_chunk['ALTID'] = variant_chunk['IDS'].str.split(",", n=1, expand=True)
+                variant_chunk["allele1"] = 0
+                variant_chunk["allele2"] = 0
+                number_of_snps_from_mapping_file += variant_chunk.shape[0]
 
-            return variants
+            if self.number_of_variants != number_of_snps_from_mapping_file:
+                raise TriTyperDataException("SNP data from '{}' and '{}' do not have equal lengths ({} vs {} respectively)"
+                                            .format(snps_file_path, snp_mappings_path,
+                                                    self.number_of_variants, number_of_snps_from_mapping_file))
+
+            return variants_file_reader
         except IOError as e:
-            raise TriTyperDataException("Could not read '{}'. {}".format(snps_file_path, str(e)))
+            raise TriTyperDataException("Could not read '{}'".format(snps_file_path), str(e))
 
     def read_genotype_matrix(self, trityper_variant_index):
         try:
@@ -216,6 +227,7 @@ class HaseHDF5Writer:
         self.chunk_size = chunk_size
         self.abs_path = os.path.abspath(path)
         self.study_name = study_name
+        self.bad_variant_indices = list()
 
         if os.path.isdir(self.abs_path):
             raise HaseHDF5WriterException("Directory '{}' already exists".format(self.abs_path))
@@ -256,24 +268,53 @@ class HaseHDF5Writer:
 
         hash_table = {'keys': np.array([], dtype=np.int), 'allele': np.array([])}
 
-        for variant_index in range(len(trityper_data.variants)):
-            alleles = trityper_data.get_alleles(variant_index)
-            hash_1 = hash(alleles[0])
-            hash_2 = hash(alleles[1])
+        variant_index = 0
+
+        for i, variant_chunk in enumerate(trityper_data.variants_file_reader):
+            alleles1 = list()
+            alleles2 = list()
+            chunked_variant_index = 0
+
+            while variant_index < len(variant_chunk):
+                alleles = trityper_data.get_alleles(variant_index)
+
+                if len(alleles) != 2:
+                    print("Not found 2 alleles for variant '{}': discarding variant..."
+                          .format(variant_chunk[chunked_variant_index, "ID"]), file=sys.stderr)
+                    self.bad_variant_indices.append(variant_index)
+                    if len(alleles) == 1:
+                        print("len alleles is 1", file=sys.stderr)
+                        alleles.append(alleles[0])
+                    elif len(alleles) == 0:
+                        print("len alleles is 0", file=sys.stderr)
+                        alleles = ["N", "N"]
+                else:
+                    alleles1.append(alleles[0])
+                    alleles2.append(alleles[1])
+
+                variant_index += 1
+                chunked_variant_index += 1
+
+            alleles1_series = pd.Series(alleles1)
+            alleles2_series = pd.Series(alleles2)
+
+            hash_1 = alleles1_series.apply(hash)
+            hash_2 = alleles2_series.apply(hash)
+
             k, indices = np.unique(np.append(hash_1, hash_2), return_index=True)
-            s = np.append(alleles[0], alleles[1])[indices]
+            s = np.append(alleles1_series, alleles2_series)[indices]
             ind = np.invert(np.in1d(k, hash_table['keys']))
             hash_table['keys'] = np.append(hash_table['keys'], k[ind])
             hash_table['allele'] = np.append(hash_table['allele'], s[ind])
+            variant_chunk["allele1"] = hash_1
+            variant_chunk["allele2"] = hash_2
 
-            trityper_data.variants.loc[variant_index, "allele1"] = hash_1
-            trityper_data.variants.loc[variant_index, "allele2"] = hash_2
-            variant_df = trityper_data.variants.iloc[[variant_index]]
-
-            variant_df.to_hdf(probes_path,
+            variant_chunk.to_hdf(probes_path,
                            data_columns=["CHR", "bp", "ID", 'allele1', 'allele2'],
                            key='probes', format='table', append=True,
                            min_itemsize=25, complib='zlib', complevel=9)
+
+            print("Wrote {} variants to probes file".format(variant_index))
 
         pd.DataFrame.from_dict(hash_table).to_csv(
             os.path.join(self.probes_directory_path, self.study_name + '_hash_table.csv.gz'),
@@ -290,17 +331,21 @@ class HaseHDF5Writer:
 
     def _write_genotype(self, trityper_data):
 
-        number_of_chunks = (len(trityper_data.variants) // self.chunk_size) + 1
+        number_of_chunks = (trityper_data.number_of_variants // self.chunk_size) + 1
         for chunk_index in range(number_of_chunks):
             start = chunk_index * self.chunk_size
-            end = min((chunk_index + 1) * self.chunk_size, len(trityper_data.variants))
+            end = min((chunk_index + 1) * self.chunk_size, trityper_data.number_of_variants)
             dosage_matrix = np.empty((end-start, len(trityper_data.individuals_data)))
 
-            print("Writing {}-{} variants to h5 chunk {} out of {} total chunks".format(
+            print("Loading {}-{} variants to write to chunk {} out of {} total chunks".format(
                 start, end, chunk_index, number_of_chunks))
 
             for variant_index in range(start, end):
                 dosage_matrix[variant_index, ] = trityper_data.get_dosages(variant_index)
+            # for bad_variant_index in self.bad_variant_indices:
+            #     np.delete(dosage_matrix, bad_variant_index, 0)
+
+            print("Discarded {} variants that did not have two alleles".format(len(self.bad_variant_indices)), file=sys.stderr)
 
             h5_gen_file = tables.open_file(
                 os.path.join(self.genotype_directory_path, str(chunk_index) + '_' + self.study_name + '.h5'), 'w', title=self.study_name)
@@ -321,8 +366,11 @@ def main(argv=None):
 
     arguments = ArgumentParser().parse_input(argv[1:])
 
+    # Prepare writer. This will also check if the output path is available
+    writer = HaseHDF5Writer(arguments.output, arguments.chunk_size, arguments.study_name)
+    # Load the TriTyperData
     trityper_data = TriTyperData(arguments.input)
-    writer = HaseHDF5Writer(arguments.output_path, arguments.chunk_size, arguments.study_name)
+    # Write the TriTyperData
     writer.write(trityper_data)
 
     return 0
