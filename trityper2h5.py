@@ -293,6 +293,7 @@ class HaseHDF5Writer:
 
         variant_index = 0
         for i, variant_chunk in enumerate(trityper_data.get_variant_chunks()):
+
             alleles1 = list()
             alleles2 = list()
             chunked_variant_index = 0
@@ -300,7 +301,6 @@ class HaseHDF5Writer:
             bad_variant_indices_probes_chunk = list()
             while chunked_variant_index < variant_chunk_length:
                 alleles = trityper_data.get_alleles(variant_index)
-
                 if len(alleles) != 2:
                     print("Not found 2 alleles for variant '{}': discarding variant..."
                           .format(variant_chunk["ID"][chunked_variant_index]), file=sys.stderr)
