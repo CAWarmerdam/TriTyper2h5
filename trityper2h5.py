@@ -247,10 +247,6 @@ class HaseHDF5Writer:
         self.study_name = study_name
         self.bad_variant_indices = list()
 
-        if os.path.isdir(self.abs_path):
-            raise HaseHDF5WriterException("Directory '{}' already exists"
-                                          .format(self.abs_path))
-
         self.probes_directory_path = os.path.join(self.abs_path, "probes")
         try:
             print("Creating probes folder at {}..."
