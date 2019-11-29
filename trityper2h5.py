@@ -112,7 +112,9 @@ class TriTyperData:
     def read_individuals_data(self):
         allele_recoding_file_path = os.path.join(self.abs_path, "Individuals.txt")
         try:
-            return pd.read_csv(allele_recoding_file_path, header=None, names = ["individual"])
+            return pd.read_csv(allele_recoding_file_path, header=None,
+                               names = ["individual"],
+                               dtype={"individual": str})
         except IOError as e:
             raise TriTyperDataException("Could not read '{}'. {}".format(allele_recoding_file_path, str(e)))
 
