@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+from __future__ import division
+from __future__ import with_statement
+from __future__ import absolute_import
 import os
 import sys
 import argparse
@@ -9,6 +12,14 @@ import tables
 
 import pandas as pd
 import numpy as np
+from io import open
+
+import errno
+
+
+class FileExistsError(OSError):
+    def __init__(self, msg):
+        super(FileExistsError, self).__init__(errno.EEXIST, msg)
 
 
 class ArgumentParser:
@@ -39,11 +50,11 @@ class ArgumentParser:
         parser.add_argument('-o', '--output', type=self.is_writable_location, required=True,
                             help="The path to write output to.")
 
-        parser.add_argument('-n', '--study_name', type=str,
+        parser.add_argument('-n', '--study_name', type=unicode,
                             required=True,
                             help="Enter a study name to use.")
 
-        parser.add_argument('-c', '--chunk_size', type=str,
+        parser.add_argument('-c', '--chunk_size', type=unicode,
                             required=False, default=25000,
                             help="The maximum number of variants for a .h5 file. (default = 25000)")
 
@@ -79,8 +90,8 @@ class TriTyperDataException(Exception):
     pass
 
 
-class TriTyperData:
-    POSSIBLE_ALLELES = ["A", "C", "T", "G", "U", "I", "N"]
+class TriTyperData(object):
+    POSSIBLE_ALLELES = ["A", "C", "T", "G", "", "I", "N"]
     PANDAS_DF_CHUNK_SIZE = 10 ** 6
 
     def __init__(self, name):
@@ -91,7 +102,7 @@ class TriTyperData:
         self.snp_mappings_path = os.path.join(self.abs_path, "SNPMappings.txt")
         self.number_of_variants = 0
 
-        print("Loading TriTyper data from '{}'...".format(self.abs_path))
+        print "Loading TriTyper data from '{}'...".format(self.abs_path)
 
         if not os.path.exists(self.abs_path):
             raise TriTyperDataException("Path '{}' does not exist".format(self.abs_path))
@@ -104,19 +115,19 @@ class TriTyperData:
 
         # Read the individual data
         self.individuals_data = self.read_individuals_data()
-        print("Loaded {} individuals".format(len(self.individuals_data)))
+        print "Loaded {} individuals".format(len(self.individuals_data))
         # Reads the variants in chunks into the variants file reader.
         self._variants_file_reader = self.read_variants()
-        print("Loaded {} variants".format(self.number_of_variants))
+        print "Loaded {} variants".format(self.number_of_variants)
 
     def read_individuals_data(self):
-        allele_recoding_file_path = os.path.join(self.abs_path, "Individuals.txt")
+        individuals_file_path = os.path.join(self.abs_path, "Individuals.txt")
         try:
-            return pd.read_csv(allele_recoding_file_path, header=None,
+            return pd.read_csv(individuals_file_path, header=None,
                                names = ["individual"],
-                               dtype={"individual": str})
-        except IOError as e:
-            raise TriTyperDataException("Could not read '{}'. {}".format(allele_recoding_file_path, str(e)))
+                               dtype={"individual": unicode})
+        except IOError, e:
+            raise TriTyperDataException("Could not read '{}'. {}".format(individuals_file_path, unicode(e)))
 
     def read_variants(self):
         try:
@@ -128,8 +139,8 @@ class TriTyperData:
             self.number_of_variants = i + 1
 
 
-        except IOError as e:
-            raise TriTyperDataException("Could not read '{}'".format(self.snps_file_path), str(e))
+        except IOError, e:
+            raise TriTyperDataException("Could not read '{}'".format(self.snps_file_path), unicode(e))
 
         # Load the variants from the snp mappings file
         variants_file_reader = pd.read_csv(self.snp_mappings_path, header=None, sep="\t",
@@ -144,7 +155,7 @@ class TriTyperData:
         # Loop through the chunks in the variants file reader
         for variant_chunk in self._variants_file_reader:
             # Split the IDS field in ID and a remaining bit
-            variant_chunk['ID'] = variant_chunk['IDS'].str.split(",", n=1, expand=True)[0]
+            variant_chunk['ID'] = variant_chunk['IDS'].unicode.split(",", n=1, expand=True)[0]
             # 'return' a variant chunk with id in every iteration
             yield variant_chunk
 
@@ -165,17 +176,17 @@ class TriTyperData:
                 variant_sample_alleles = list()
                 genotype_matrix_bytearray = bytearray(genotype_matrix_file.read(2 * len(self.individuals_data)))
 
-                for i in range(len(self.individuals_data)):
+                for i in xrange(len(self.individuals_data)):
                     allele_index_second = i + len(self.individuals_data)
-                    first_allele = chr(genotype_matrix_bytearray[i])
-                    second_allele = chr(genotype_matrix_bytearray[allele_index_second])
+                    first_allele = unichr(genotype_matrix_bytearray[i])
+                    second_allele = unichr(genotype_matrix_bytearray[allele_index_second])
                     variant_sample_alleles.append(
                         (first_allele if first_allele in self.POSSIBLE_ALLELES else None,
                          second_allele if second_allele in self.POSSIBLE_ALLELES else None))
                 return variant_sample_alleles
 
-        except IOError as e:
-            raise TriTyperDataException("Could not read '{}'. {}".format(self.genotype_matrix_file_path, str(e)))
+        except IOError, e:
+            raise TriTyperDataException("Could not read '{}'. {}".format(self.genotype_matrix_file_path, unicode(e)))
 
     def get_dosages(self, trityper_variant_index):
         dosage_values_float = list()
@@ -191,7 +202,7 @@ class TriTyperData:
                 genotype_matrix_bytearray = bytearray(genotype_matrix_file.read(2 * len(self.individuals_data)))
 
                 take_complement = False
-                for i in range(len(dosage_matrix_bytearray)):
+                for i in xrange(len(dosage_matrix_bytearray)):
                     dosage_byte = dosage_matrix_bytearray[i]
                     dosage_values.append(dosage_byte)
                     if dosage_byte != 127:
@@ -208,7 +219,7 @@ class TriTyperData:
                             break
 
                 if take_complement:
-                    for i in range(len(dosage_values)):
+                    for i in xrange(len(dosage_values)):
                         dosage_byte = dosage_values[i]
                         if dosage_byte != 127:
                             dosage_byte = 200 - (128 + dosage_byte + -128)
@@ -220,8 +231,8 @@ class TriTyperData:
                     else:
                         dosage_values_float.append(float(128 + int(dosage_byte)) / 100)
 
-        except IOError as e:
-            raise TriTyperDataException("Could not read '{}'. {}".format(self.dosage_matrix_file_path, str(e)))
+        except IOError, e:
+            raise TriTyperDataException("Could not read '{}'. {}".format(self.dosage_matrix_file_path, unicode(e)))
 
         return dosage_values_float
 
@@ -240,7 +251,7 @@ class HaseHDF5WriterException(Exception):
     pass
 
 
-class HaseHDF5Writer:
+class HaseHDF5Writer(object):
     def __init__(self, path, chunk_size, study_name):
         self.chunk_size = chunk_size
         self.abs_path = os.path.abspath(path)
@@ -249,38 +260,35 @@ class HaseHDF5Writer:
 
         self.probes_directory_path = os.path.join(self.abs_path, "probes")
         try:
-            print("Creating probes folder at {}..."
-                  .format(self.probes_directory_path))
+            print "Creating probes folder at {}...".format(self.probes_directory_path)
             os.makedirs(self.probes_directory_path)
-        except FileExistsError as e:
+        except FileExistsError, e:
             raise HaseHDF5WriterException("Directory '{}' already exists"
                                           .format(self.probes_directory_path), e)
 
         self.individuals_directory_path = os.path.join(self.abs_path, "individuals")
         try:
-            print("Creating individuals folder at {}..."
-                  .format(self.individuals_directory_path))
+            print "Creating individuals folder at {}...".format(self.individuals_directory_path)
             os.mkdir(self.individuals_directory_path)
-        except FileExistsError as e:
+        except FileExistsError, e:
             raise HaseHDF5WriterException("Directory '{}' already exists"
                                           .format(self.individuals_directory_path), e)
 
         self.genotype_directory_path = os.path.join(self.abs_path, "genotype")
         try:
-            print("Creating genotype folder at {}..."
-                  .format(self.genotype_directory_path))
+            print "Creating genotype folder at {}...".format(self.genotype_directory_path)
             os.mkdir(self.genotype_directory_path)
-        except FileExistsError as e:
+        except FileExistsError, e:
             raise HaseHDF5WriterException("Directory '{}' already exists"
                                           .format(self.genotype_directory_path), e)
 
     def write(self, trityper_data):
         self._write_probes(trityper_data)
-        print("Completed probes file")
+        print "Completed probes file"
         self._write_individuals(trityper_data)
-        print("Completed individuals file")
+        print "Completed individuals file"
         self._write_genotype(trityper_data)
-        print("Completed genotype file")
+        print "Completed genotype file"
 
     def _write_probes(self, trityper_data):
         probes_path = os.path.join(self.probes_directory_path, self.study_name + '.h5')
@@ -300,9 +308,8 @@ class HaseHDF5Writer:
             while chunked_variant_index < variant_chunk_length:
                 alleles = trityper_data.get_alleles(variant_index)
                 if len(alleles) != 2:
-                    print("Not found 2 alleles for variant '{}': discarding variant..."
-                          .format(variant_chunk["ID"][chunked_variant_index]), file=sys.stderr)
-                    print(variant_index, chunked_variant_index)
+                    print >>sys.stderr, "Not found 2 alleles for variant '{}': discarding variant...".format(variant_chunk["ID"][chunked_variant_index])
+                    print variant_index, chunked_variant_index
                     self.bad_variant_indices.append(variant_index)
                     bad_variant_indices_probes_chunk.append(chunked_variant_index)
 
@@ -344,7 +351,7 @@ class HaseHDF5Writer:
                            key='probes', format='table', append=True,
                            min_itemsize=25, complib='zlib', complevel=9, dropna=True)
 
-            print("Wrote {} variants to probes file".format(variant_index))
+            print "Wrote {} variants to probes file".format(variant_index)
 
         pd.DataFrame.from_dict(hash_table).to_csv(
             os.path.join(self.probes_directory_path, self.study_name + '_hash_table.csv.gz'),
@@ -362,16 +369,16 @@ class HaseHDF5Writer:
     def _write_genotype(self, trityper_data):
 
         number_of_chunks = (trityper_data.number_of_variants // self.chunk_size) + 1
-        for chunk_index in range(number_of_chunks):
+        for chunk_index in xrange(number_of_chunks):
             start = chunk_index * self.chunk_size
             end = min((chunk_index + 1) * self.chunk_size, trityper_data.number_of_variants)
             dosage_matrix = np.empty((end-start, len(trityper_data.individuals_data)))
 
-            print("Loading {}-{} variants to write to chunk {} out of {} total chunks".format(
-                start, end, chunk_index, number_of_chunks))
+            print "Loading {}-{} variants to write to chunk {} out of {} total chunks".format(
+                start, end, chunk_index, number_of_chunks)
 
             # Get the dosages for every variant within the
-            for chunked_variant_index, variant_index in enumerate(range(start, end)):
+            for chunked_variant_index, variant_index in enumerate(xrange(start, end)):
                 dosage_matrix[chunked_variant_index, ] = trityper_data.get_dosages(variant_index)
 
             # Drop every variant that did not have two alleles.
@@ -379,11 +386,11 @@ class HaseHDF5Writer:
             for bad_variant_index in self.bad_variant_indices:
                 if start <= bad_variant_index < end:
                     bad_variant_indices_chunk.append(bad_variant_index - start)
-            print(bad_variant_indices_chunk)
+            print bad_variant_indices_chunk
             dosage_matrix = np.delete(dosage_matrix, bad_variant_indices_chunk, 0)
 
             h5_gen_file = tables.open_file(
-                os.path.join(self.genotype_directory_path, str(chunk_index) + '_' + self.study_name + '.h5'), 'w', title=self.study_name)
+                os.path.join(self.genotype_directory_path, unicode(chunk_index) + '_' + self.study_name + '.h5'), 'w', title=self.study_name)
 
             atom = tables.Float16Atom()
             genotype = h5_gen_file.create_carray(h5_gen_file.root, 'genotype', atom,
@@ -393,8 +400,8 @@ class HaseHDF5Writer:
 
             genotype[:] = dosage_matrix
             h5_gen_file.close()
-        print("Discarded {} variants that did not have two alleles".format(
-            len(self.bad_variant_indices)), file=sys.stderr)
+        print >>sys.stderr, "Discarded {} variants that did not have two alleles".format(
+            len(self.bad_variant_indices))
 
 
 def main(argv=None):
