@@ -154,7 +154,7 @@ class TriTyperData(object):
         # Loop through the chunks in the variants file reader
         for variant_chunk in self._variants_file_reader:
             # Split the IDS field in ID and a remaining bit
-            variant_chunk['ID'] = variant_chunk['IDS'].split(",", n=1, expand=True)[0]
+            variant_chunk['ID'] = variant_chunk['IDS'].str.split(",", n=1, expand=True)[0]
             # 'return' a variant chunk with id in every iteration
             yield variant_chunk
 
