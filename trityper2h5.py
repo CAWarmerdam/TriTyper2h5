@@ -50,11 +50,11 @@ class ArgumentParser:
         parser.add_argument('-o', '--output', type=self.is_writable_location, required=True,
                             help="The path to write output to.")
 
-        parser.add_argument('-n', '--study_name', type=unicode,
+        parser.add_argument('-n', '--study_name', type=str,
                             required=True,
                             help="Enter a study name to use.")
 
-        parser.add_argument('-c', '--chunk_size', type=unicode,
+        parser.add_argument('-c', '--chunk_size', type=str,
                             required=False, default=25000,
                             help="The maximum number of variants for a .h5 file. (default = 25000)")
 
@@ -124,10 +124,9 @@ class TriTyperData(object):
         individuals_file_path = os.path.join(self.abs_path, "Individuals.txt")
         try:
             return pd.read_csv(individuals_file_path, header=None,
-                               names = ["individual"],
-                               dtype={"individual": unicode})
+                               names = ["individual"])
         except IOError, e:
-            raise TriTyperDataException("Could not read '{}'. {}".format(individuals_file_path, unicode(e)))
+            raise TriTyperDataException("Could not read '{}'. {}".format(individuals_file_path, e))
 
     def read_variants(self):
         try:
@@ -140,7 +139,7 @@ class TriTyperData(object):
 
 
         except IOError, e:
-            raise TriTyperDataException("Could not read '{}'".format(self.snps_file_path), unicode(e))
+            raise TriTyperDataException("Could not read '{}'".format(self.snps_file_path), e)
 
         # Load the variants from the snp mappings file
         variants_file_reader = pd.read_csv(self.snp_mappings_path, header=None, sep="\t",
@@ -155,7 +154,7 @@ class TriTyperData(object):
         # Loop through the chunks in the variants file reader
         for variant_chunk in self._variants_file_reader:
             # Split the IDS field in ID and a remaining bit
-            variant_chunk['ID'] = variant_chunk['IDS'].unicode.split(",", n=1, expand=True)[0]
+            variant_chunk['ID'] = variant_chunk['IDS'].split(",", n=1, expand=True)[0]
             # 'return' a variant chunk with id in every iteration
             yield variant_chunk
 
@@ -186,7 +185,7 @@ class TriTyperData(object):
                 return variant_sample_alleles
 
         except IOError, e:
-            raise TriTyperDataException("Could not read '{}'. {}".format(self.genotype_matrix_file_path, unicode(e)))
+            raise TriTyperDataException("Could not read '{}'. {}".format(self.genotype_matrix_file_path, e))
 
     def get_dosages(self, trityper_variant_index):
         dosage_values_float = list()
@@ -232,7 +231,7 @@ class TriTyperData(object):
                         dosage_values_float.append(float(128 + int(dosage_byte)) / 100)
 
         except IOError, e:
-            raise TriTyperDataException("Could not read '{}'. {}".format(self.dosage_matrix_file_path, unicode(e)))
+            raise TriTyperDataException("Could not read '{}'. {}".format(self.dosage_matrix_file_path, e))
 
         return dosage_values_float
 
@@ -390,7 +389,7 @@ class HaseHDF5Writer(object):
             dosage_matrix = np.delete(dosage_matrix, bad_variant_indices_chunk, 0)
 
             h5_gen_file = tables.open_file(
-                os.path.join(self.genotype_directory_path, unicode(chunk_index) + '_' + self.study_name + '.h5'), 'w', title=self.study_name)
+                os.path.join(self.genotype_directory_path, str(chunk_index) + '_' + str(self.study_name) + '.h5'), 'w', title=self.study_name)
 
             atom = tables.Float16Atom()
             genotype = h5_gen_file.create_carray(h5_gen_file.root, 'genotype', atom,
